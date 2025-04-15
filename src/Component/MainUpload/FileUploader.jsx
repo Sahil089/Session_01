@@ -7,6 +7,7 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
   const [fileName, setFileName] = useState('');
   const [extractedText, setExtractedText] = useState('');
   const [error, setError] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
 
   useEffect(() => {
     pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -77,9 +78,9 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
 
       setExtractedText(text);
 
-      // Send text to LLM for summarization
-      const summary = await summarizeText(text);
-      onProcessedText(summary);
+      // Send text to LLM for processing with custom prompt
+      const result = await processTextWithPrompt(text, customPrompt);
+      onProcessedText(result);
     } catch (error) {
       setError(error.message);
     } finally {
@@ -87,14 +88,17 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
     }
   };
 
-  const summarizeText = async (text) => {
+  const processTextWithPrompt = async (text, prompt) => {
     try {
-      // Using a better model for summarization
+      // Using a better model for processing
       const API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn";
-      const API_KEY = "your api key";
+      const API_KEY = "api key ";
 
-      // Create a prompt that guides the model to summarize the document
-      const prompt = `Please provide a concise summary of the following document, highlighting the main points and key information:\n\n${text.substring(0, 1000)}`;
+      // Default prompt if user doesn't provide one
+      const userPrompt = prompt.trim() || "Please summarize the following document:";
+      
+      // Format the prompt to be more effective with the BART model
+      const fullPrompt = `Task: ${userPrompt}\n\nDocument: ${text.substring(0, 2000)}`;
 
       const response = await fetch(API_URL, {
         method: "POST",
@@ -103,30 +107,32 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          inputs: prompt,
+          inputs: fullPrompt,
           parameters: {
             max_length: 500,
             min_length: 100,
-            do_sample: false
+            do_sample: true,
+            temperature: 0.7,
+            num_beams: 4
           }
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get summary from API');
+        throw new Error('Failed to get response from API');
       }
 
       const result = await response.json();
-      return result[0]?.summary_text || "Unable to generate summary.";
+      return result[0]?.summary_text || "Unable to generate response.";
     } catch (error) {
-      console.error('Error summarizing text:', error);
-      throw new Error('Failed to summarize text');
+      console.error('Error processing text:', error);
+      throw new Error('Failed to process text with the provided prompt');
     }
   };
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 max-w-md mx-auto">
-      <h2 className="text-2xl font-bold text-purple-800 mb-6 text-center">Document Summarizer</h2>
+      <h2 className="text-2xl font-bold text-purple-800 mb-6 text-center">Document Processor</h2>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="border-2 border-dashed border-purple-300 rounded-lg p-8 text-center hover:border-purple-500 transition-colors">
@@ -151,6 +157,20 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
               Supports PDF and DOCX formats
             </p>
           </label>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="custom-prompt" className="block text-sm font-medium text-gray-700">
+            Custom Prompt (instructions for processing)
+          </label>
+          <textarea
+            id="custom-prompt"
+            rows="3"
+            className="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            value={customPrompt}
+            onChange={(e) => setCustomPrompt(e.target.value)}
+            placeholder="Enter your instructions for processing the document..."
+          ></textarea>
         </div>
 
         {error && (
