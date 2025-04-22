@@ -88,47 +88,69 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
     }
   };
 
-  const processTextWithPrompt = async (text, prompt) => {
-    try {
-      // Using a better model for processing
-      const API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn";
-      const API_KEY = "api key ";
+const processTextWithPrompt = async (text, prompt) => {
+  try {
+    const API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn";
+    const API_KEY = "API KEY";
 
-      // Default prompt if user doesn't provide one
-      const userPrompt = prompt.trim() || "Please summarize the following document:";
-      
-      // Format the prompt to be more effective with the BART model
-      const fullPrompt = `Task: ${userPrompt}\n\nDocument: ${text.substring(0, 2000)}`;
-
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inputs: fullPrompt,
-          parameters: {
-            max_length: 500,
-            min_length: 100,
-            do_sample: true,
-            temperature: 0.7,
-            num_beams: 4
-          }
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get response from API');
-      }
-
-      const result = await response.json();
-      return result[0]?.summary_text || "Unable to generate response.";
-    } catch (error) {
-      console.error('Error processing text:', error);
-      throw new Error('Failed to process text with the provided prompt');
+    // Handle empty prompt with a generic instruction
+    const userPrompt = prompt.trim() || "Please analyze the following document:";
+    
+    // Create a dynamic system instruction based on user's prompt
+    let systemInstruction = "";
+    if (userPrompt.toLowerCase().includes("summarize")) {
+      systemInstruction = "Generate a comprehensive summary of the document.";
+    } else if (userPrompt.toLowerCase().includes("key points")) {
+      systemInstruction = "Extract and list the main key points from the document.";
+    } else if (userPrompt.toLowerCase().includes("analyze")) {
+      systemInstruction = "Provide a detailed analysis of the document's content.";
+    } else {
+      systemInstruction = "Process the document according to the given instructions.";
     }
-  };
+
+    // Combine user prompt with system instruction for better context
+    const fullPrompt = `
+      System Instruction: ${systemInstruction}
+      User Request: ${userPrompt}
+      Document Content: ${text.substring(0, 2000)}
+      
+      Please provide a response that specifically addresses the user's request.
+    `;
+
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: fullPrompt,
+        parameters: {
+          max_length: 500,
+          min_length: 100,
+          do_sample: true,
+          temperature: 0.8,  // Slightly increased for more creative responses
+          num_beams: 4,
+          no_repeat_ngram_size: 3,  // Prevent repetitive phrases
+          top_k: 50,  // Add diversity to responses
+        }
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get response from API');
+    }
+
+    const result = await response.json();
+    
+    // Process the response to match user's request format
+    const processedResponse = result[0]?.generated_text || result[0]?.summary_text || "Unable to generate response.";
+    return processedResponse.trim();
+  } catch (error) {
+    console.error('Error processing text:', error);
+    throw new Error('Failed to process text with the provided prompt');
+  }
+};
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 max-w-md mx-auto">
