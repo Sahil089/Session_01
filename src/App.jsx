@@ -1,12 +1,13 @@
 
 import './App.css'
+import ImageGenerater from './Component/AIimageGenerater'
 
 function App() {
 
 
   return (
     <>
-main screen
+<ImageGenerater/>
     </>
   )
 }
