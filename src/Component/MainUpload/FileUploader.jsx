@@ -94,7 +94,18 @@ const FileUploader = ({ onProcessedText, setIsLoading }) => {
       const API_KEY = "your api key";
 
       // Create a prompt that guides the model to summarize the document
-      const prompt = `Please provide a concise summary of the following document, highlighting the main points and key information:\n\n${text.substring(0, 1000)}`;
+      const prompt = `Please read the following document and provide a section-wise summary, dividing the content into the following parts:
+
+Introduction: Briefly explain the background and purpose of the document.
+
+Main Content / Body: Summarize the key ideas, findings, or discussions presented.
+
+Conclusion / Summary: Highlight the final takeaways, results, or recommendations.
+
+Your summary should be clear, concise, and capture the core message of each section. Avoid unnecessary details or repetition.
+
+Document:
+${text.substring(0, 1000)}`;
 
       const response = await fetch(API_URL, {
         method: "POST",
