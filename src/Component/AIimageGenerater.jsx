@@ -7,40 +7,37 @@ const ImageGenerater = () => {
     const [loading, setLoading] = useState(false);
 
     const generateImage = async () => {
+        setLoading(true);
+        
+        // Prepare the request payload
+        const payload = {
+          prompt: prompt, // Prompt from the state
+        };
+      
         try {
-            setLoading(true);
-            const response = await fetch(
-                "endpoint",
-                {
-                    headers: {
-                        Authorization: "Bearer API KEY",
-                        "Content-Type": "application/json",
-                    },
-                    method: "POST",
-                    body: JSON.stringify({
-                        inputs: prompt,
-                        options: {
-                            wait_for_model: true
-                        }
-                    }),
-                }
-            );
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const blob = await response.blob();
-            const imageUrl = URL.createObjectURL(blob);
-            setImage(imageUrl);
-
+          const response = await fetch('http://localhost:5000/generate-image', {  // Make sure to replace with your Flask server URL
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+      
+          if (!response.ok) {
+            throw new Error('Failed to generate image');
+          }
+      
+          const blob = await response.blob();
+          const imageUrl = URL.createObjectURL(blob);
+      
+          // Set the generated image URL to state
+          setImage(imageUrl);
         } catch (error) {
-            console.error('Error generating image:', error);
-            alert('Failed to generate image. Please try again.');
+          console.error('Error generating image:', error);
         } finally {
-            setLoading(false);
+          setLoading(false);
         }
-    };
+      };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-purple-700 p-8">
