@@ -1,160 +1,128 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
-import { FaMicrophone, FaMicrophoneSlash } from "react-icons/fa";
+import { FaMicrophone, FaMicrophoneSlash, FaPaperPlane } from "react-icons/fa";
 import { BsChatDotsFill } from "react-icons/bs";
+import { FaVolumeUp, FaStop } from "react-icons/fa";
+import ReactMarkdown from "react-markdown";
+import removeMarkdown from "remove-markdown";
 
 const ChatBot = () => {
   const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [recognitionStatus, setRecognitionStatus] = useState("idle");
-  const [recognitionError, setRecognitionError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentBotMessage, setCurrentBotMessage] = useState("");
-  
-  // Use refs to track state across event handlers without causing re-renders
-  const listeningRef = useRef(false);
-  const processingRef = useRef(false);
-  const silenceTimeoutRef = useRef(null);
-  const lastTranscriptRef = useRef("");
+  const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef(null);
-  
+
   const {
     transcript,
     listening,
     resetTranscript,
     browserSupportsSpeechRecognition,
     isMicrophoneAvailable
-  } = useSpeechRecognition({
-    clearTranscriptOnListen: true,
-  });
+  } = useSpeechRecognition();
 
-  // Define callback functions using useCallback to prevent unnecessary re-creation
-  const startListening = useCallback(() => {
-    if (processingRef.current || listeningRef.current) return;
-    
-    resetTranscript();
-    setRecognitionError(null);
-    listeningRef.current = true;
-    
-    try {
-      SpeechRecognition.startListening({ 
-        continuous: false,
-        language: 'en-US',
-        interimResults: true
-      });
-      setRecognitionStatus("listening");
-    } catch (error) {
-      console.error("Speech recognition start error:", error);
-      setRecognitionError("Failed to start listening. Please try again.");
-      listeningRef.current = false;
-      setRecognitionStatus("idle");
+  // Auto-scroll to the latest message
+  useEffect(() => {
+    const chatContainer = document.getElementById("chat-container");
+    if (chatContainer) {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
     }
-  }, [resetTranscript]);
+  }, [messages]);
 
-  const stopListening = useCallback(() => {
-    if (!listeningRef.current) return;
-    
-    listeningRef.current = false;
-    SpeechRecognition.stopListening();
-    
-    if (transcript.trim()) {
-      setRecognitionStatus("processing");
-      processingRef.current = true;
-    } else {
-      setRecognitionStatus("idle");
+  // Handle text-to-speech
+  const handleTextToSpeech = async (text) => {
+    if (isPlaying) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setIsPlaying(false);
+      return;
     }
-  }, [transcript]);
 
-  // Handle streaming audio from the API
-  const playStreamingAudio = useCallback(async (text) => {
     try {
       setIsPlaying(true);
-      setCurrentBotMessage(text);
+      setAudioLoading(true);
+      const plainText = removeMarkdown(text);
       
-      // Create audio context for streaming
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      
-      // Fetch streaming audio from server
       const response = await fetch('http://127.0.0.1:5050/text-to-speech', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text: text }),
+        body: JSON.stringify({ text: plainText }),
       });
+
+      if (!response.ok) throw new Error('TTS API response was not ok');
+
+      // Get the complete audio data
+      const audioData = await response.arrayBuffer();
+      const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+      const audioUrl = URL.createObjectURL(audioBlob);
       
-      if (!response.ok) {
-        throw new Error('TTS API response was not ok');
-      }
-      
-      // Get the reader from the stream
-      const reader = response.body.getReader();
-      
-      // Create a new ReadableStream and pipe the response to it
-      const stream = new ReadableStream({
-        async start(controller) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
-          controller.close();
-        }
-      });
-      
-      // Create a new response from our stream
-      const streamResponse = new Response(stream);
-      // Get the blob from the response
-      const blob = await streamResponse.blob();
-      // Create object URL
-      const url = URL.createObjectURL(blob);
-      
-      // Play the audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = url;
-        audioRef.current.play();
-      } else {
-        audioRef.current = new Audio(url);
-        audioRef.current.play();
-      }
-      
-      // Cleanup when audio ends
-      audioRef.current.onended = () => {
+      // Create and play audio
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
         setIsPlaying(false);
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(audioUrl);
       };
-      
+
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      setAudioLoading(false);
+      await audio.play();
     } catch (error) {
-      console.error('Error playing streaming audio:', error);
+      console.error('TTS Error:', error);
       setIsPlaying(false);
+      setAudioLoading(false);
+      if (audioRef.current) {
+        audioRef.current = null;
+      }
     }
-  }, []);
+  };
 
-  // Define handleSend using useCallback
-  const handleSend = useCallback(async () => {
-    if (!transcript.trim()) {
-      processingRef.current = false;
-      return;
-    }
-
-    const userInput = transcript.trim();
-    lastTranscriptRef.current = userInput;
+  // Add loading spinner or progress bar for better UX
+{isPlaying && (
+    <div className="flex justify-center items-center">
+        <div className="loader">Playing audio...</div>
+    </div>
+)}
+  // Process user input and get bot response
+  const processUserInput = async (userInput) => {
+    if (!userInput.trim()) return;
     
-    // Add user message immediately
+    // Add user message
     setMessages(prev => [...prev, { type: "user", text: userInput }]);
     
     try {
       setIsLoading(true);
       
-      // Generate bot response (you can replace this with your actual API call)
-      const botResponse = `I heard you say: "${userInput}". How can I help with that?`;
+      // Call generate-response API
+      const response = await fetch('http://127.0.0.1:5050/generate-response', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: userInput }),
+      });
+  
+      if (!response.ok) throw new Error('Failed to get response');
+  
+      const botResponse = await response.text();
       
       // Add bot message
-      setMessages(prev => [...prev, { type: "bot", text: botResponse }]);
-      
-      // Play streaming audio
-      await playStreamingAudio(botResponse);
+      setMessages(prev => [...prev, { 
+        type: "bot", 
+        text: botResponse,
+        timestamp: new Date().toISOString()
+      }]);
       
     } catch (error) {
       console.error("Error processing message:", error);
@@ -163,95 +131,45 @@ const ChatBot = () => {
         text: "Sorry, I couldn't process that message." 
       }]);
     } finally {
-      resetTranscript();
       setIsLoading(false);
-      processingRef.current = false;
-      setRecognitionStatus("idle");
     }
-  }, [transcript, resetTranscript, playStreamingAudio]);
+  };
 
-  // Auto-restart listening after processing completes
+  // Handle text input
+  const handleTextInput = (e) => {
+    setInputText(e.target.value);
+  };
+
+  // Handle text submit
+  const handleTextSubmit = (e) => {
+    e.preventDefault();
+    if (!inputText.trim() || isLoading) return;
+    
+    processUserInput(inputText);
+    setInputText("");
+  };
+
+  // Handle voice input
+  const handleVoiceInput = async () => {
+    if (!transcript.trim()) return;
+    
+    await processUserInput(transcript.trim());
+    resetTranscript();
+  };
+
+  // Auto-process voice input when speech recognition stops
   useEffect(() => {
-    if (!listening && transcript.trim() && !processingRef.current) {
-      processingRef.current = true;
-      handleSend();
+    if (!listening && transcript.trim()) {
+      handleVoiceInput();
     }
-  }, [listening, transcript, handleSend]);
+  }, [listening, transcript]);
 
-  // Update recognition status based on listening state and transcript
-  useEffect(() => {
-    if (listening) {
-      setRecognitionStatus(transcript ? "active" : "listening");
-    }
-    
-    // Set up silence detection
-    if (listening && transcript) {
-      if (silenceTimeoutRef.current) {
-        clearTimeout(silenceTimeoutRef.current);
-      }
-      
-      silenceTimeoutRef.current = setTimeout(() => {
-        if (listening && listeningRef.current) {
-          stopListening();
-        }
-      }, 1500);
-    }
-    
-    return () => {
-      if (silenceTimeoutRef.current) {
-        clearTimeout(silenceTimeoutRef.current);
-      }
-    };
-  }, [listening, transcript, stopListening]);
-
-  // Set up keyboard event listeners
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.code === "Space" && !e.repeat && !processingRef.current && !isLoading) {
-        e.preventDefault();
-        startListening();
-      }
-    };
-
-    const handleKeyUp = (e) => {
-      if (e.code === "Space" && listeningRef.current) {
-        e.preventDefault();
-        stopListening();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [startListening, stopListening, isLoading]);
-
-  // Automatic restart of listening if browser errors occur
-  useEffect(() => {
-    const checkAndRestartRecognition = () => {
-      if (!listening && listeningRef.current && !processingRef.current) {
-        setTimeout(startListening, 100);
-      }
-    };
-    
-    const intervalId = setInterval(checkAndRestartRecognition, 3000);
-    
-    return () => clearInterval(intervalId);
-  }, [listening, startListening]);
-
-  // Browser support checks
   if (!browserSupportsSpeechRecognition) {
     return (
       <div className="p-6 max-w-lg mx-auto bg-red-50 rounded-xl shadow-lg">
         <h1 className="text-xl font-bold mb-6 text-center text-red-800">
           Error: Browser doesn't support speech recognition
         </h1>
-        <p>
-          Try using a modern browser like Chrome, Edge, or Safari.
-        </p>
       </div>
     );
   }
@@ -262,103 +180,125 @@ const ChatBot = () => {
         <h1 className="text-xl font-bold mb-6 text-center text-yellow-800">
           Microphone Access Required
         </h1>
-        <p>
-          Please allow microphone access in your browser settings to use the voice chatbot.
-        </p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-lg mx-auto bg-gray-50 rounded-xl shadow-lg">
-      <h1 className="text-2xl font-bold mb-6 text-center text-blue-800">Voice Assistant</h1>
-      
-      {/* Bot visualization */}
-      <div className="mb-8 flex flex-col items-center">
-        <div className={`w-32 h-32 rounded-full bg-blue-500 flex items-center justify-center mb-4 transition-all duration-300 ${isPlaying ? 'scale-110 shadow-lg' : ''}`}>
-          <BsChatDotsFill size={64} color="white" className={isPlaying ? 'animate-pulse' : ''} />
-        </div>
-        
-        {/* Caption area */}
-        <div className="w-full p-4 bg-white rounded-lg shadow-md min-h-16 text-center">
-          {isPlaying ? (
-            <p className="text-blue-800 font-medium">{currentBotMessage}</p>
-          ) : (
-            <p className="text-gray-500 italic">Assistant is waiting...</p>
-          )}
-        </div>
+    <div className="flex flex-col h-screen mx-auto bg-gradient-to-b from-gray-900 to-black text-white">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-900 to-purple-600 text-white p-4 shadow-lg">
+        <h1 className="text-xl font-bold text-center">AI Chat Assistant</h1>
       </div>
-      
-      {/* User transcript area */}
-      <div className={`w-full p-3 bg-gray-100 rounded-lg mb-6 min-h-16 ${transcript ? '' : 'flex items-center justify-center'}`}>
-        {transcript ? (
-          <p className="text-gray-800">{transcript}</p>
-        ) : (
-          <p className="text-gray-500 italic text-center">Your voice input will appear here</p>
+
+      {/* Chat Messages */}
+      <div id="chat-container" className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-900 to-black">
+        {messages.length === 0 && (
+          <div className="flex justify-center items-center h-full text-gray-400">
+            <div className="text-center p-8 rounded-xl bg-gradient-to-br from-gray-800/40 to-gray-900/40 backdrop-blur-sm">
+              <BsChatDotsFill className="mx-auto text-6xl mb-4 text-purple-400" />
+              <p className="text-gray-300 font-light">Start a conversation</p>
+            </div>
+          </div>
+        )}
+        
+        {messages.map((msg, index) => (
+          <div
+            key={index}
+            className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'} mb-3`}
+          >
+            <div
+              className={`max-w-[75%] rounded-lg p-3 shadow-lg ${
+                msg.type === 'user'
+                  ? 'bg-gradient-to-r from-purple-700 to-purple-500 text-white rounded-br-none'
+                  : 'bg-gradient-to-r from-gray-800 to-gray-700 text-gray-100 rounded-bl-none border-l-2 border-purple-400'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="break-words">
+                  <ReactMarkdown>
+                    {msg.text}
+                  </ReactMarkdown>
+                </div>
+                {msg.type === 'bot' && (
+                  <button
+                    onClick={() => handleTextToSpeech(msg.text)}
+                    className={`ml-2 p-1.5 rounded-full transition-all hover:bg-purple-500/20 ${
+                      isPlaying && audioRef.current
+                        ? 'text-green-400 bg-green-400/10'
+                        : 'text-purple-300 hover:text-purple-100'
+                    }`}
+                    aria-label={isPlaying ? "Stop playback" : "Listen to response"}
+                    disabled={audioLoading}
+                  >
+                    {audioLoading ? (
+                      <div className="h-4 w-4 border-2 border-purple-300 border-t-transparent rounded-full animate-spin"></div>
+                    ) : isPlaying && audioRef.current ? (
+                      <FaStop className="h-4 w-4" />
+                    ) : (
+                      <FaVolumeUp className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-lg p-3 rounded-bl-none border-l-2 border-purple-400 shadow-lg">
+              <div className="flex space-x-2">
+                <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                <div className="w-2 h-2 bg-purple-300 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-      
-      {/* Recent conversation history */}
-      <div className="mb-6">
-        <h2 className="text-sm font-semibold text-gray-600 mb-2">Recent conversation:</h2>
-        <div className="max-h-40 overflow-y-auto p-3 bg-white rounded-lg shadow-inner">
-          {messages.length === 0 ? (
-            <p className="text-center text-gray-400 italic">No messages yet</p>
-          ) : (
-            messages.slice(-4).map((msg, index) => (
-              <div
-                key={index}
-                className={`mb-2 p-2 rounded ${
-                  msg.type === "user" 
-                    ? "bg-gray-100 text-gray-800" 
-                    : "bg-blue-50 text-blue-800"
-                }`}
-              >
-                <span className="text-xs font-bold block mb-1">
-                  {msg.type === "user" ? "You:" : "Assistant:"}
-                </span>
-                {msg.text}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
 
-      {/* Microphone button */}
-      <div className="flex justify-center">
-        <button
-          onMouseDown={listeningRef.current || processingRef.current ? null : startListening}
-          onMouseUp={listeningRef.current ? stopListening : null}
-          onTouchStart={listeningRef.current || processingRef.current ? null : startListening}
-          onTouchEnd={listeningRef.current ? stopListening : null}
-          disabled={isLoading || processingRef.current}
-          className={`p-4 rounded-full transition-all ${
-            listening 
-              ? "bg-green-600 text-white shadow-lg scale-110 pulse-animation" 
-              : isLoading || processingRef.current
-                ? "bg-gray-400 text-white cursor-not-allowed"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-          }`}
-        >
-          {listening ? <FaMicrophone size={24} /> : <FaMicrophoneSlash size={24} />}
-        </button>
-        <p className="text-sm text-gray-600 ml-4 self-center">
-          {listening ? "Release to send" : isLoading || processingRef.current ? "Processing..." : "Hold to speak"}
-        </p>
+      {/* Input Area */}
+      <div className="border-t border-purple-900/50 p-4 bg-gradient-to-r from-gray-900 to-gray-800 backdrop-blur-lg">
+        <form onSubmit={handleTextSubmit} className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={listening ? SpeechRecognition.stopListening : SpeechRecognition.startListening}
+            disabled={isLoading}
+            className={`p-3 rounded-full flex-shrink-0 transition-all shadow-lg ${
+              listening
+                ? 'bg-gradient-to-r from-red-600 to-red-500 text-white'
+                : 'bg-gradient-to-r from-purple-700 to-purple-500 text-white hover:from-purple-600 hover:to-purple-400'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            aria-label={listening ? "Stop listening" : "Start listening"}
+          >
+            {listening ? <FaMicrophone size={18} /> : <FaMicrophoneSlash size={18} />}
+          </button>
+          
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={inputText}
+              onChange={handleTextInput}
+              placeholder="Type your message..."
+              className="w-full bg-gray-800/80 rounded-lg p-3 pr-12 focus:outline-none focus:ring-2 focus:ring-purple-500 text-white placeholder-gray-400 shadow-inner"
+              disabled={isLoading}
+            />
+            
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isLoading}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-purple-400 hover:text-purple-200 disabled:text-gray-500 transition-colors hover:bg-purple-500/20 rounded-full"
+              aria-label="Send message"
+            >
+              <FaPaperPlane size={16} />
+            </button>
+          </div>
+        </form>
       </div>
-
-      <style jsx>{`
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.7); }
-          70% { box-shadow: 0 0 0 10px rgba(22, 163, 74, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
-        }
-        .pulse-animation {
-          animation: pulse 2s infinite;
-        }
-      `}</style>
     </div>
+
   );
 };
 
-export default ChatBot;                   
+export default ChatBot;
