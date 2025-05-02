@@ -12,7 +12,9 @@ const ChatBot = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
+  const [spacePressed, setSpacePressed] = useState(false);
   const audioRef = useRef(null);
+  const inputRef = useRef(null);
 
   const {
     transcript,
@@ -20,7 +22,43 @@ const ChatBot = () => {
     resetTranscript,
     browserSupportsSpeechRecognition,
     isMicrophoneAvailable
-  } = useSpeechRecognition();
+  } = useSpeechRecognition({
+    // Configure speech recognition to not submit every time it pauses
+    commands: []
+  });
+
+  // Handle space key press/release for push-to-talk functionality
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Only activate if space is pressed and input is not focused
+      if (e.code === 'Space' && document.activeElement !== inputRef.current) {
+        e.preventDefault(); // Prevent scrolling the page
+        if (!listening && !spacePressed) {
+          setSpacePressed(true);
+          resetTranscript(); // Clear any previous transcript
+          SpeechRecognition.startListening({ continuous: true }); // Use continuous mode
+        }
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      if (e.code === 'Space' && spacePressed) {
+        setSpacePressed(false);
+        if (listening) {
+          SpeechRecognition.stopListening();
+          // We'll handle the voice input processing in a separate effect
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [listening, spacePressed, resetTranscript]);
 
   // Auto-scroll to the latest message
   useEffect(() => {
@@ -88,12 +126,6 @@ const ChatBot = () => {
     }
   };
 
-  // Add loading spinner or progress bar for better UX
-{isPlaying && (
-    <div className="flex justify-center items-center">
-        <div className="loader">Playing audio...</div>
-    </div>
-)}
   // Process user input and get bot response
   const processUserInput = async (userInput) => {
     if (!userInput.trim()) return;
@@ -189,6 +221,9 @@ const ChatBot = () => {
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-900 to-purple-600 text-white p-4 shadow-lg">
         <h1 className="text-xl font-bold text-center">AI Chat Assistant</h1>
+        <p className="text-xs text-center mt-1 text-purple-200">
+          Press and hold <span className="px-2 py-0.5 bg-gray-800 rounded text-white">Space</span> to speak
+        </p>
       </div>
 
       {/* Chat Messages */}
@@ -198,6 +233,7 @@ const ChatBot = () => {
             <div className="text-center p-8 rounded-xl bg-gradient-to-br from-gray-800/40 to-gray-900/40 backdrop-blur-sm">
               <BsChatDotsFill className="mx-auto text-6xl mb-4 text-purple-400" />
               <p className="text-gray-300 font-light">Start a conversation</p>
+              <p className="text-gray-400 text-sm mt-2">Press and hold Space to speak</p>
             </div>
           </div>
         )}
@@ -269,7 +305,7 @@ const ChatBot = () => {
               listening
                 ? 'bg-gradient-to-r from-red-600 to-red-500 text-white'
                 : 'bg-gradient-to-r from-purple-700 to-purple-500 text-white hover:from-purple-600 hover:to-purple-400'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            } ${spacePressed ? 'ring-2 ring-white ring-opacity-60' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
             aria-label={listening ? "Stop listening" : "Start listening"}
           >
             {listening ? <FaMicrophone size={18} /> : <FaMicrophoneSlash size={18} />}
@@ -277,6 +313,7 @@ const ChatBot = () => {
           
           <div className="flex-1 relative">
             <input
+              ref={inputRef}
               type="text"
               value={inputText}
               onChange={handleTextInput}
@@ -295,9 +332,17 @@ const ChatBot = () => {
             </button>
           </div>
         </form>
+        
+        {/* Push to talk hint */}
+        <div className="flex justify-center mt-2">
+          <div className={`text-xs px-2 py-1 rounded-full ${listening ? 'bg-red-500/20 text-red-300' : 'bg-purple-800/30 text-purple-300'}`}>
+            {listening 
+              ? "Listening... Release Space to send" 
+              : "Hold Space to talk"}
+          </div>
+        </div>
       </div>
     </div>
-
   );
 };
 
